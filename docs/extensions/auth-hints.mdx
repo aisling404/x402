@@ -1,0 +1,185 @@
+---
+title: "Auth Hints"
+description: "Provide authentication metadata in 402 responses so clients can complete auth before submitting payment, eliminating unnecessary round trips."
+---
+
+The `auth-hints` extension lets resource servers advertise which payment requirements need authentication — and how to obtain credentials — directly in the `402 Payment Required` response. Clients can then complete authentication before submitting a payment, avoiding an extra round trip.
+
+## Overview
+
+Without this extension, a client that submits a payment payload without credentials receives a `401 Unauthorized` response and must retry. The `auth-hints` extension solves this by including authentication metadata in the `402` response, mapped to specific `accepts[]` entries.
+
+**Key characteristics:**
+- **Server ↔ Client** extension — the Facilitator is not involved in authentication
+- Authentication hints are **mandatory**, not advisory — if an `acceptIndexes` value applies to a chosen `accepts[]` entry, authentication is required
+- Works alongside the standard `WWW-Authenticate` header (RFC 9110)
+
+## How it works
+
+1. Server returns `402` with the `auth-hints` extension listing which `accepts[]` entries require auth and how to obtain credentials
+2. Client evaluates all payment requirements, including their authentication burden
+3. Client selects a payment requirement and, if it requires auth, completes the authentication flow first
+4. Client submits the payment with both authentication credentials and the x402 payment payload
+
+## Interaction with `WWW-Authenticate`
+
+The `auth-hints` extension complements the standard `WWW-Authenticate` header:
+
+| Scenario | `WWW-Authenticate` | `auth-hints` | Meaning |
+|---|---|---|---|
+| Resource requires auth | Present | Absent | Auth is mandatory for all payment requirements. Standard HTTP flow. |
+| Entry requires auth | Absent | Present | Auth is required only for specific `accepts[]` entries. Client uses extension hints. |
+| Both | Present | Present | Auth is mandatory for the resource AND the extension provides entry-specific hints. |
+| Neither | Absent | Absent | No authentication required. |
+
+## 402 response format
+
+A server includes the `auth-hints` extension in the `extensions` object of the `402` response:
+
+```json
+{
+  "x402Version": 2,
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "10000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+      "maxTimeoutSeconds": 60
+    },
+    {
+      "scheme": "deferred",
+      "network": "eip155:8453",
+      "amount": "10000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+      "maxTimeoutSeconds": 60
+    }
+  ],
+  "extensions": {
+    "auth-hints": {
+      "info": {
+        "authRequirements": [
+          {
+            "acceptIndexes": [1],
+            "methods": [
+              {
+                "type": "oauth2",
+                "tokenType": "DPoP",
+                "authorizationServer": "https://as.example.com",
+                "tokenEndpoint": "https://as.example.com/token",
+                "registrationEndpoint": "https://as.example.com/register"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+In this example, `accepts[0]` (exact) requires no authentication. `accepts[1]` (deferred) requires OAuth 2.0 with DPoP.
+
+## `authRequirements` fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `acceptIndexes` | integer[] | Yes | Indexes into the `accepts[]` array identifying which payment requirements require auth. |
+| `methods` | array | Yes | Supported authentication methods. Client picks one. |
+
+Clients MUST silently ignore any index in `acceptIndexes` that is out of range for the `accepts[]` array.
+
+## Authentication method types
+
+### `oauth2`
+
+OAuth 2.0 authentication. The client obtains an access token and presents it alongside the x402 payment.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | `"oauth2"` |
+| `tokenType` | string | Yes | Token type: `"Bearer"` or `"DPoP"` |
+| `authorizationServer` | string | Yes | Base URL of the authorization server. |
+| `tokenEndpoint` | string | Yes | URL of the token endpoint. |
+| `registrationEndpoint` | string | No | URL of the DCR endpoint (RFC 7591). If absent, the client must already have a `client_id`. |
+
+### `sign-in-with-x`
+
+Wallet-based authentication via CAIP-122. When a client encounters this method type, it MUST look at the [`sign-in-with-x` extension](./sign-in-with-x) on the same `PaymentRequired` response for the full challenge parameters. The auth-hint serves only as a pointer.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | `"sign-in-with-x"` |
+
+## Presenting credentials (HTTP)
+
+On HTTP transports, authentication credentials are sent as standard HTTP headers alongside the x402 `PAYMENT-SIGNATURE` header.
+
+**OAuth 2.0 — Bearer:**
+```
+Authorization: Bearer <access-token>
+PAYMENT-SIGNATURE: <base64-encoded-payment-payload>
+```
+
+**OAuth 2.0 — DPoP:**
+```
+Authorization: DPoP <access-token>
+DPoP: <proof-jwt>
+PAYMENT-SIGNATURE: <base64-encoded-payment-payload>
+```
+
+**Sign-In With X:**
+```
+SIGN-IN-WITH-X: <base64-encoded-siwx-proof>
+PAYMENT-SIGNATURE: <base64-encoded-payment-payload>
+```
+
+For non-HTTP transports (MCP, A2A, etc.), credential presentation is defined by the respective transport specifications.
+
+## Example flow: OAuth 2.0 with DCR and DPoP
+
+1. **Client requests resource** — `GET /premium-data`
+2. **Server returns 402** — includes `auth-hints` indicating `accepts[1]` (deferred) requires OAuth 2.0 with DPoP
+3. **Client chooses `accepts[1]`** — sees the auth requirement and registers with the authorization server via Dynamic Client Registration (RFC 7591)
+4. **Client obtains DPoP-bound access token** — requests a token from the token endpoint using the registered `client_id`
+5. **Client submits payment with authentication:**
+   ```
+   GET /premium-data HTTP/1.1
+   Host: api.example.com
+   Authorization: DPoP eyJ...
+   DPoP: <dpop-proof-jwt>
+   PAYMENT-SIGNATURE: <base64-encoded-payment-payload>
+   ```
+6. **Server validates both** — validates the DPoP-bound access token and verifies the x402 payment, then fulfills the request
+
+## Server verification
+
+When the server receives a request with both authentication credentials and a payment payload, it validates both independently:
+
+1. **Validate authentication** — for `oauth2`: validate token signature, audience, expiry, and DPoP binding; for `sign-in-with-x`: verify the SIWX proof per the [sign-in-with-x extension](./sign-in-with-x)
+2. **Validate payment** — forward the `PaymentPayload` to the facilitator for verification and settlement
+3. If both succeed, fulfill the request
+
+Authentication identity and payment identity are independent. The authenticated client may use one or more payer wallets, subject to server policy.
+
+## Security considerations
+
+- Use sender-constrained tokens (DPoP) when possible to prevent token theft and replay
+- Validate token audience (`aud`) to ensure the token was issued for the correct resource server
+- Validate token expiry to limit the window of use
+- Protect token endpoints with TLS
+- Authorization servers should implement replay protection for DPoP proofs (RFC 9449)
+- For `sign-in-with-x`, servers MUST validate nonce uniqueness to prevent replay attacks
+
+## SDK support
+
+This extension is currently defined at the protocol level. SDK implementations are in progress.
+
+## Related resources
+
+- [Sign-In-With-X extension](./sign-in-with-x) — wallet-based authentication that integrates with `auth-hints`
+- [Extension spec](https://github.com/x402-foundation/x402/blob/main/specs/extensions/extension-auth-hints.md) — full protocol specification
+- [RFC 7591: OAuth 2.0 Dynamic Client Registration](https://www.rfc-editor.org/rfc/rfc7591)
+- [RFC 9449: OAuth 2.0 DPoP](https://www.rfc-editor.org/rfc/rfc9449)
