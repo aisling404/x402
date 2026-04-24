@@ -66,6 +66,7 @@
         "group": "Extensions",
         "pages": [
           "extensions/overview",
+          "extensions/auth-hints",
           "extensions/bazaar",
           "extensions/payment-identifier",
           "extensions/sign-in-with-x",
