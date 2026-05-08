@@ -28,6 +28,7 @@ This page tracks which features are implemented in each SDK (TypeScript, Go, Pyt
 |---------|------------|-----|--------|
 | evm (EIP-155) | ✅ | ✅ | ✅ |
 | svm (Solana) | ✅ | ✅ | ✅ |
+| tvm (TON) | ❌ | ❌ | ✅ |
 | avm (Algorand) | ✅ | ❌ | ❌ |
 | stellar | ✅ | ❌ | ❌ |
 | aptos | ✅ | ❌ | ❌ |
