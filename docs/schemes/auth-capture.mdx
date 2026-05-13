@@ -1,0 +1,115 @@
+---
+title: "Auth Capture"
+description: "Refundable x402 payments where funds are held in escrow or sent directly with refund capability."
+---
+
+The `authCapture` scheme lets a seller accept payments that can be refunded or voided. The buyer authorizes a maximum amount, and the facilitator either locks funds in escrow for later settlement (two-phase) or sends them directly to the receiver with refund capability (single-shot).
+
+Use `authCapture` when you need buyer protection, delayed delivery, or session billing where the client needs recourse if the service is unsatisfactory.
+
+### Settlement paths
+
+The scheme supports two settlement paths, selected via `extra.autoCapture`:
+
+| `autoCapture` | Behavior |
+| :--- | :--- |
+| `false` (default) | Two-phase. Funds held in escrow. The captureAuthorizer can capture, void, or refund. Client can reclaim if the capture deadline passes. |
+| `true` | Single-shot. Funds sent directly to receiver. The captureAuthorizer can refund post-settlement. |
+
+**Two-phase (`autoCapture: false`, default):**
+
+```
+AUTHORIZE → RESOURCE DELIVERED → CAPTURE / VOID → (REFUND)
+```
+
+1. **Authorize**: Client authorization is submitted — funds locked in escrow.
+2. **Resource delivered**: Server returns the resource (HTTP 200).
+3. **Capture or void**: The captureAuthorizer can capture (finalize funds to the receiver) or void (release escrowed funds back to client).
+4. **Reclaim**: If the capture deadline passes without action, the client can reclaim directly.
+5. **Refund**: After capture, the captureAuthorizer can refund within the refund window.
+
+**Single-shot (`autoCapture: true`):**
+
+```
+CHARGE → RESOURCE DELIVERED → (REFUND)
+```
+
+1. **Charge**: Client authorization is submitted — funds sent directly to receiver.
+2. **Resource delivered**: Server returns the resource (HTTP 200).
+3. **Refund**: The captureAuthorizer can refund within the refund window.
+
+### EVM server setup
+
+The EVM implementation uses the [base/commerce-payments](https://github.com/base/commerce-payments) contract stack. The server advertises `authCapture` requirements including the `captureAuthorizer` address, deadlines, and fee bounds.
+
+```json
+{
+  "x402Version": 2,
+  "accepts": [
+    {
+      "scheme": "authCapture",
+      "network": "eip155:8453",
+      "amount": "1000000",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0xReceiverAddress",
+      "maxTimeoutSeconds": 60,
+      "extra": {
+        "name": "USDC",
+        "version": "2",
+        "captureAuthorizer": "0xCaptureAuthorizerAddress",
+        "captureDeadline": 1740758554,
+        "refundDeadline": 1741276954,
+        "minFeeBps": 0,
+        "maxFeeBps": 1000,
+        "feeRecipient": "0xFeeRecipientAddress",
+        "autoCapture": false,
+        "assetTransferMethod": "eip3009"
+      }
+    }
+  ]
+}
+```
+
+### `extra` fields
+
+| Field | Required | Type | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | Yes | `string` | EIP-712 token-domain name (e.g., `"USDC"`). Used for ERC-3009 signing only. |
+| `version` | Yes | `string` | EIP-712 token-domain version (e.g., `"2"`). |
+| `captureAuthorizer` | Yes | `address` | Address authorized to authorize, capture, void, refund, or charge. |
+| `captureDeadline` | Yes | `uint48` | Absolute Unix seconds — capture must occur before this. After this, the client can reclaim. |
+| `refundDeadline` | Yes | `uint48` | Absolute Unix seconds — refunds allowed until this. |
+| `feeRecipient` | Yes | `address` | Fee recipient address. Set to `address(0)` to let the captureAuthorizer specify any non-zero recipient at capture/charge time. |
+| `minFeeBps` | Yes | `uint16` | Minimum fee in basis points. `0` = no minimum. |
+| `maxFeeBps` | Yes | `uint16` | Maximum fee in basis points. |
+| `autoCapture` | No | `bool` | `true` → single-shot charge. `false` → two-phase authorize. Default: `false`. |
+| `assetTransferMethod` | No | `"eip3009" \| "permit2"` | Which token collector to use. Default: `"eip3009"`. |
+
+### EVM transfer methods
+
+| Method | Description |
+| :--- | :--- |
+| `eip3009` | Uses token-native `receiveWithAuthorization` (USDC, EURC, etc.). This is the default. |
+| `permit2` | Uses Uniswap Permit2 `permitTransferFrom` for any ERC-20 token. |
+
+A server may list multiple `accepts[]` entries with different `assetTransferMethod` values so clients can pick the method matching their token approvals.
+
+### Comparison with `exact`
+
+| Aspect | `exact` | `authCapture` |
+| :--- | :--- | :--- |
+| Settlement | Immediate transfer | Via escrow (two-phase) or direct with refund capability (single-shot) |
+| Refundable | No | Yes (both paths) |
+| Fee system | None | Configurable (min/max bounds, client-signed) |
+
+### Specs
+
+* [`authCapture` spec](https://github.com/x402-foundation/x402/blob/main/specs/schemes/authCapture/scheme_authCapture.md)
+* [`authCapture` EVM spec](https://github.com/x402-foundation/x402/blob/main/specs/schemes/authCapture/scheme_authCapture_evm.md)
+
+### See also
+
+* [Payment schemes overview](/schemes/overview)
+* [Exact](/schemes/exact)
+* [Upto](/schemes/upto)
+* [Batch settlement](/schemes/batch-settlement)
