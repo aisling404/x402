@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/x402-foundation/x402/go/extensions/bazaar"
+	"github.com/x402-foundation/x402/go/v2/extensions/bazaar"
 )
 
 type BazaarCatalog struct {

@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	x402 "github.com/x402-foundation/x402/go"
-	"github.com/x402-foundation/x402/go/extensions/bazaar"
-	evm "github.com/x402-foundation/x402/go/mechanisms/evm/exact/facilitator"
-	uptoevm "github.com/x402-foundation/x402/go/mechanisms/evm/upto/facilitator"
-	svm "github.com/x402-foundation/x402/go/mechanisms/svm/exact/facilitator"
+	x402 "github.com/x402-foundation/x402/go/v2"
+	"github.com/x402-foundation/x402/go/v2/extensions/bazaar"
+	evm "github.com/x402-foundation/x402/go/v2/mechanisms/evm/exact/facilitator"
+	uptoevm "github.com/x402-foundation/x402/go/v2/mechanisms/evm/upto/facilitator"
+	svm "github.com/x402-foundation/x402/go/v2/mechanisms/svm/exact/facilitator"
 )
 
 /**

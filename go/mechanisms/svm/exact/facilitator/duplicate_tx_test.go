@@ -8,7 +8,7 @@ import (
 	solana "github.com/gagliardetto/solana-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/x402-foundation/x402/go/mechanisms/svm"
+	"github.com/x402-foundation/x402/go/v2/mechanisms/svm"
 )
 
 func TestFacilitatorInstructionConstraints(t *testing.T) {
